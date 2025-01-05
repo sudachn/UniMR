@@ -1,6 +1,6 @@
 # UniMR
 
-# 5. UniMR User Guide
+# UniMR User Guide
 
 This software is designed to segment, enhance, and match molecular images using image processing and machine learning techniques. Users can upload molecular images, select target molecules, and obtain classification results.
 
