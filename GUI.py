@@ -240,7 +240,7 @@ class App:
             r = red_entry.get()
             g = green_entry.get()
             b = blue_entry.get()
-            self.color_values = (molecule_name, r, g, b)
+            self.color_values = (molecule_name, b, g, r)
             dialog.destroy()
         
         submit_button = tk.Button(dialog, text="Submit", command=on_submit)
