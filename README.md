@@ -13,17 +13,17 @@ To use our software, you need to use the following systems and install the corre
 
 ### Dependencies
 
-﻿basicsr==1.4.2
-matplotlib==3.9.2
-numpy==1.26.3
-openai-clip==1.0.1
-opencv-python==4.10.0.84
-pillow==10.2.0
-realesrgan==0.3.0
-scipy==1.13.1
-torch==2.5.1+cu124
-torchaudio==2.5.1+cu124
-torchvision==0.20.1+cu124
+-﻿ basicsr==1.4.2
+- matplotlib==3.9.2
+- numpy==1.26.3
+- openai-clip==1.0.1
+- opencv-python==4.10.0.84
+- pillow==10.2.0
+- realesrgan==0.3.0
+- scipy==1.13.1
+- torch==2.5.1+cu124
+- torchaudio==2.5.1+cu124
+- torchvision==0.20.1+cu124
 
 Installation command:
 
