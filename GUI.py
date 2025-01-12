@@ -8,13 +8,79 @@ from scipy import spatial
 import clip
 import torch
 import time
+import glob
+from basicsr.archs.rrdbnet_arch import RRDBNet
+from basicsr.utils.download_util import load_file_from_url
+from realesrgan import RealESRGANer
 
 def rotate_image(image, angle):
+    """旋转图像"""
     (h, w) = image.shape[:2]
     center = (w // 2, h // 2)
     M = cv2.getRotationMatrix2D(center, angle, 1.0)
     rotated = cv2.warpAffine(image, M, (w, h))
     return rotated
+
+def inference_realesrgan(input_folder, output_folder='results', outscale=4, suffix='out', tile=0, tile_pad=10, pre_pad=0, fp32=False, ext='auto', gpu_id=None):
+    # Model configuration for RealESRGAN_x4plus
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+    netscale = 4
+    model_name = 'RealESRGAN_x4plus'
+    file_url = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
+
+    # Determine model path
+    model_path = os.path.join('models', model_name + '.pth')
+    if not os.path.isfile(model_path):
+        ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+        model_path = load_file_from_url(url=file_url, model_dir=os.path.join(ROOT_DIR, 'weights'), progress=True, file_name=None)
+
+    # Restorer
+    upsampler = RealESRGANer(
+        scale=netscale,
+        model_path=model_path,
+        model=model,
+        tile=tile,
+        tile_pad=tile_pad,
+        pre_pad=pre_pad,
+        half=not fp32,
+        gpu_id=gpu_id)
+
+    # Create output directory
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Process input folder or file
+    if os.path.isfile(input_folder):
+        paths = [input_folder]
+    else:
+        paths = sorted(glob.glob(os.path.join(input_folder, '*')))
+
+    for idx, path in enumerate(paths):
+        imgname, extension = os.path.splitext(os.path.basename(path))
+
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if len(img.shape) == 3 and img.shape[2] == 4:
+            img_mode = 'RGBA'
+        else:
+            img_mode = None
+
+        try:
+            output, _ = upsampler.enhance(img, outscale=outscale)
+        except RuntimeError as error:
+            print('Error', error)
+            print('If you encounter CUDA out of memory, try to set --tile with a smaller number.')
+        else:
+            if ext == 'auto':
+                extension = extension[1:]
+            else:
+                extension = ext
+            if img_mode == 'RGBA':  # RGBA images should be saved in png format
+                extension = 'png'
+            if suffix == '':
+                save_path = os.path.join(output_folder, f'{imgname}.{extension}')
+            else:
+                save_path = os.path.join(output_folder, f'{imgname}_{suffix}.{extension}')
+            cv2.imwrite(save_path, output)
+
 
 class App:
     def __init__(self, root):
@@ -37,6 +103,28 @@ class App:
         self.threshold = 0.9
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
+    
+    def filter_contours_by_size(self, contours, image_shape, size_threshold_factor=2):
+        """
+        过滤掉过大或过小的分割区域。
+        :param contours: 分割得到的轮廓列表。
+        :param image_shape: 图像的形状 (height, width)。
+        :param size_threshold_factor: 用于确定大小阈值的因子。默认为2，表示保留面积在平均值的2倍标准差之内的轮廓。
+        :return: 过滤后的轮廓列表。
+        """
+        areas = [cv2.contourArea(contour) for contour in contours]
+        avg_area = np.mean(areas)
+        std_area = np.std(areas)
+        lower_bound = max(avg_area - size_threshold_factor * std_area, 0)
+        upper_bound = avg_area + size_threshold_factor * std_area
+
+        filtered_contours = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if lower_bound <= area <= upper_bound:
+                filtered_contours.append(contour)
+
+        return filtered_contours
 
     def load_image_path(self):
         file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg;*.jpeg;*.png")])
@@ -57,15 +145,12 @@ class App:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
         contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        filtered_contours = self.filter_contours_by_size(contours, image.shape[:2])
 
-        self.save_contour_images(image, contours)
-
+        self.save_contour_images(image, filtered_contours)
         self.contour_image = image.copy()
-        for i, contour in enumerate(contours):
-            if i == 0:
-                continue
+        for i, contour in enumerate(filtered_contours):
             x, y, w, h = cv2.boundingRect(contour)
             x = max(x - 1, 0)
             y = max(y - 1, 0)
@@ -92,23 +177,22 @@ class App:
         self.threshold_entry = tk.Entry(self.image_window, width=5)
         self.threshold_entry.insert(0, str(self.threshold))
         self.threshold_entry.pack()
-        self.apply_threshold_button = tk.Button(self.image_window, text="Apply Threshold", command=self.apply_threshold)
-        self.apply_threshold_button.pack()
+
+        tk.Label(self.image_window, text="Max Parallel Count:").pack()
+        self.max_parallel_entry = tk.Entry(self.image_window, width=5)
+        self.max_parallel_entry.insert(0, "100")  # 默认值为100
+        self.max_parallel_entry.pack()
 
         self.confirm_button = tk.Button(self.image_window, text="Confirm", command=self.classify_molecules)
         self.confirm_button.pack()
         self.image_window.update_idletasks()
 
-    def close_image_window(self):
-        self.image_window.destroy()
-
     def save_contour_images(self, image, contours):
+        """保存每个轮廓对应的图像区域"""
         directory = 'molecule_images'
         if not os.path.exists(directory):
             os.makedirs(directory)
         for i, contour in enumerate(contours):
-            if i == 0:
-                continue
             x, y, w, h = cv2.boundingRect(contour)
             roi = image[y:y+h, x:x+w]
             cv2.imwrite(os.path.join(directory, f"molecule_{i+1}.png"), roi)
@@ -186,6 +270,26 @@ class App:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
+    def enhance_images(self, images, output_folder):
+        """对图像进行增强"""
+        temp_folder = 'temp_images'
+        os.makedirs(temp_folder, exist_ok=True)
+        os.makedirs(output_folder, exist_ok=True)
+        for i, image in enumerate(images):
+            cv2.imwrite(os.path.join(temp_folder, f'temp_{i}.png'), image)
+        inference_realesrgan(temp_folder, output_folder)
+        enhanced_images = []
+        for i in range(len(images)):
+            enhanced_image_path = os.path.join(output_folder, f'temp_{i}_out.png')
+            enhanced_image = cv2.imread(enhanced_image_path)
+            if enhanced_image is None:
+                raise FileNotFoundError(f"Enhanced image not found: {enhanced_image_path}")
+            enhanced_images.append(enhanced_image)
+        import shutil
+        shutil.rmtree(temp_folder)
+
+        return enhanced_images
+
     def clip_vectors(self, images):
         a = time.time()
         images = [Image.fromarray(image) for image in images]
@@ -195,30 +299,51 @@ class App:
             embeddings = self.model.encode_image(images)
         vectors = embeddings.cpu().numpy().tolist()
         b = time.time()
-        print('clip:{}'.format(b-a))
         return vectors
 
     def calculate_similarity(self, vector1, vector2):
+        """计算两个向量之间的余弦相似度"""
         a = time.time()
         result = 1 - spatial.distance.cosine(vector1, vector2)
         b = time.time()
-        print('calculate:{}'.format(b-a))
         return result
 
     def classify_molecules(self):
+        try:
+            self.threshold = float(self.threshold_entry.get())
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number for threshold.")
+            return
+        try:
+            max_parallel = int(self.max_parallel_entry.get())
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number for max parallel count.")
+            return
+
         sample_vectors = {}
         classified_count = {'other': 0}
-
         sample_images = [info['image'] for info in self.molecule_info if info.get('name')]
-        sample_vectors_list = self.clip_vectors(sample_images)
-        
+        enhanced_sample_images = self.enhance_images(sample_images, 'enhanced_samples')
+        rotated_sample_images = []
+        for sample_image in enhanced_sample_images:
+            for angle in range(0, 360, 10):
+                rotated_image = rotate_image(sample_image, angle)
+                rotated_sample_images.append(rotated_image)
+        sample_vectors_list = []
+        for i in range(0, len(rotated_sample_images), max_parallel):
+            batch = rotated_sample_images[i:i + max_parallel]
+            sample_vectors_list.extend(self.clip_vectors(batch))
         sample_indices = [i for i, info in enumerate(self.molecule_info) if info.get('name')]
         for i, sample_index in enumerate(sample_indices):
             info = self.molecule_info[sample_index]
-            sample_vectors[info['name']] = (sample_vectors_list[i], info['color'])
-
+            for j in range(36):
+                sample_vectors[(info['name'], j)] = (sample_vectors_list[i * 36 + j], info['color'])
         unknown_images = [info['image'] for info in self.molecule_info if not info.get('name')]
-        unknown_vectors_list = self.clip_vectors(unknown_images)
+        enhanced_unknown_images = self.enhance_images(unknown_images, 'enhanced_unknowns')
+        unknown_vectors_list = []
+        for i in range(0, len(enhanced_unknown_images), max_parallel):
+            batch = enhanced_unknown_images[i:i + max_parallel]
+            unknown_vectors_list.extend(self.clip_vectors(batch))
 
         unknown_indices = [i for i, info in enumerate(self.molecule_info) if not info.get('name')]
         for i, unknown_index in enumerate(unknown_indices):
@@ -226,7 +351,7 @@ class App:
             molecule_vector = unknown_vectors_list[i]
             max_similarity = 0
             best_match = 'other'
-            for name, (sample_vector, color) in sample_vectors.items():
+            for (name, angle), (sample_vector, color) in sample_vectors.items():
                 similarity = self.calculate_similarity(molecule_vector, sample_vector)
                 if similarity > max_similarity and similarity > self.threshold:
                     max_similarity = similarity
@@ -234,7 +359,7 @@ class App:
 
             if best_match != 'other':
                 info['name'] = best_match
-                info['color'] = sample_vectors[best_match][1]
+                info['color'] = sample_vectors[(best_match, 0)][1]
                 classified_count[best_match] = classified_count.get(best_match, 0) + 1
             else:
                 classified_count['other'] += 1
