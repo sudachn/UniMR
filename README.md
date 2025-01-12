@@ -25,14 +25,22 @@ To use our software, you need to use the following systems and install the corre
 - torchaudio==2.5.1+cu124
 - torchvision==0.20.1+cu124
 
+## Install
 Installation command:
 
 ```bash
 pip install -r requirements.txt
 ```
+
+You can download the Real-ESRGAN model from the following address: [RealESRGAN_x4plus.pth](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth)
+You can download the ViT-B-32.pt, which is an available model for OpenAI-CLIP, from the following address: [ViT-B-32.pt]([<download_link_here>](https://openaipublic.azureedge.net/clip/models/40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af/ViT-B-32.pt))
+
+After downloading the models, please place them in the `models` folder within your project directory.
 ## Usage
 
 This section will introduce how to use the UniMR software.
+
+
 
 1. **Launch the UniMR Software**
 
