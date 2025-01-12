@@ -13,7 +13,7 @@ To use our software, you need to use the following systems and install the corre
 
 ### Dependencies
 
--﻿ basicsr==1.4.2
+- basicsr==1.4.2
 - matplotlib==3.9.2
 - numpy==1.26.3
 - openai-clip==1.0.1
