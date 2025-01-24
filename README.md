@@ -21,9 +21,9 @@ To use our software, you need to use the following systems and install the corre
 - pillow==10.2.0
 - realesrgan==0.3.0
 - scipy==1.13.1
-- torch==2.5.1+cu124
-- torchaudio==2.5.1+cu124
-- torchvision==0.20.1+cu124
+- torch==2.5.1
+- torchaudio==2.5.1
+- torchvision==0.20.1
 
 The CUDA version used in the test is 12.4. For detailed instructions on installing CUDA, please refer to https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html.
 ## Install
