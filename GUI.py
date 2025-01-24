@@ -7,7 +7,6 @@ import numpy as np
 from scipy import spatial
 import clip
 import torch
-import time
 import glob
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from basicsr.utils.download_util import load_file_from_url
@@ -291,21 +290,16 @@ class App:
         return enhanced_images
 
     def clip_vectors(self, images):
-        a = time.time()
         images = [Image.fromarray(image) for image in images]
         images = [self.preprocess(image).unsqueeze(0).to(self.device) for image in images]
         images = torch.cat(images, dim=0)
         with torch.no_grad():
             embeddings = self.model.encode_image(images)
         vectors = embeddings.cpu().numpy().tolist()
-        b = time.time()
         return vectors
 
     def calculate_similarity(self, vector1, vector2):
-        """计算两个向量之间的余弦相似度"""
-        a = time.time()
         result = 1 - spatial.distance.cosine(vector1, vector2)
-        b = time.time()
         return result
 
     def classify_molecules(self):
