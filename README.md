@@ -25,6 +25,7 @@ To use our software, you need to use the following systems and install the corre
 - torchaudio==2.5.1+cu124
 - torchvision==0.20.1+cu124
 
+The CUDA version used in the test is 12.4. For detailed instructions on installing CUDA, please refer to https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html.
 ## Install
 Installation command:
 
