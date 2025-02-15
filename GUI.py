@@ -89,7 +89,7 @@ class App:
         self.label_instruction.pack(pady=10)
         self.frame_image_path = tk.Frame(root)
         self.frame_image_path.pack(pady=5)
-        self.label_image_path = tk.Label(self.frame_image_path, text="image path：")
+        self.label_image_path = tk.Label(self.frame_image_path, text="Image path：")
         self.label_image_path.pack(side=tk.LEFT, padx=(0, 10))
         self.entry = tk.Entry(self.frame_image_path, width=50)
         self.entry.pack(side=tk.LEFT)
@@ -141,26 +141,37 @@ class App:
         if image is None:
             print("Error: Image not found.")
             return
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
+        # 缩放图像以适应固定窗口大小
+        max_display_size = 600  # 设置最大显示尺寸
+        height, width = image.shape[:2]
+        scale_factor = min(max_display_size / width, max_display_size / height)
+        display_image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
+
+        # 保存缩放比例
+        self.scale_factor = scale_factor
+
+        gray = cv2.cvtColor(display_image, cv2.COLOR_BGR2GRAY)
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        filtered_contours = self.filter_contours_by_size(contours, image.shape[:2])
+        filtered_contours = self.filter_contours_by_size(contours, display_image.shape[:2])
 
-        self.save_contour_images(image, filtered_contours)
-        self.contour_image = image.copy()
+        self.save_contour_images(display_image, filtered_contours)
+        self.contour_image = display_image.copy()
         for i, contour in enumerate(filtered_contours):
             x, y, w, h = cv2.boundingRect(contour)
             x = max(x - 1, 0)
             y = max(y - 1, 0)
-            w = min(w + 2, image.shape[1] - x)
-            h = min(h + 2, image.shape[0] - y)
+            w = min(w + 2, display_image.shape[1] - x)
+            h = min(h + 2, display_image.shape[0] - y)
             cv2.rectangle(self.contour_image, (x, y), (x+w, y+h), (255, 255, 255), 1)
-            roi = image[y:y+h, x:x+w]
+            roi = display_image[y:y+h, x:x+w]
             self.molecule_info.append({'bbox': (x, y, w, h), 'contour': contour, 'index': i + 1, 'image': roi, 'name': None, 'color': (255, 255, 255)})
 
-        self.image_window = Toplevel(self.root)
+        # 显示图像
+        self.image_window = tk.Toplevel(self.root)
         self.image_window.title("Molecule Contours")
+        self.image_window.geometry("650x760+900+100")  # 子窗口位置
 
         pil_image = Image.fromarray(cv2.cvtColor(self.contour_image, cv2.COLOR_BGR2RGB))
         self.photo = ImageTk.PhotoImage(pil_image)
@@ -187,7 +198,6 @@ class App:
         self.image_window.update_idletasks()
 
     def save_contour_images(self, image, contours):
-        """保存每个轮廓对应的图像区域"""
         directory = 'molecule_images'
         if not os.path.exists(directory):
             os.makedirs(directory)
@@ -202,6 +212,7 @@ class App:
             for info in self.molecule_info:
                 x1, y1, w, h = info['bbox']
                 if x1 <= x <= x1 + w and y1 <= y <= y1 + h:
+                    # 获取用户输入的分子名称和颜色
                     self.get_molecule_name_and_color(self.image_window)
                     if self.color_values:
                         molecule_name, r, g, b = self.color_values
@@ -209,6 +220,15 @@ class App:
                             r, g, b = int(r), int(g), int(b)
                             info['name'] = molecule_name
                             info['color'] = (r, g, b)
+
+                            # 将临时图像上的坐标映射回原图
+                            original_x = int(x1 / self.scale_factor)
+                            original_y = int(y1 / self.scale_factor)
+                            original_w = int(w / self.scale_factor)
+                            original_h = int(h / self.scale_factor)
+                            info['original_bbox'] = (original_x, original_y, original_w, original_h)
+
+                            # 在原图上标记选择的分子
                             self.mark_sample_molecule(info, (r, g, b))
                     break
 
@@ -217,6 +237,7 @@ class App:
     def get_molecule_name_and_color(self, parent):
         dialog = Toplevel(parent)
         dialog.title("Input Molecule Name and Color")
+        dialog.geometry("350x250+150+350")
         
         tk.Label(dialog, text="Name:").pack()
         name_entry = tk.Entry(dialog)
@@ -373,6 +394,7 @@ class App:
 
         result_dialog = Toplevel(self.root)
         result_dialog.title("Classification Results")
+        result_dialog.geometry("400x200+500+350")
 
         tk.Label(result_dialog, text=result_message, wraplength=400).pack(pady=20)
         ok_button = tk.Button(result_dialog, text="OK", command=result_dialog.destroy)
@@ -380,6 +402,8 @@ class App:
 
 def main():
     root = tk.Tk()
+    root.title("Start")
+    root.geometry("750x200+150+100")
     app = App(root)
     root.mainloop()
 
