@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, Toplevel, simpledialog, messagebox
 import cv2
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageEnhance
 import os
 import numpy as np
 from scipy import spatial
@@ -11,6 +11,23 @@ import glob
 from sklearn.mixture import GaussianMixture
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
+
+# === 新增亮度归一化参数，与实验脚本保持一致 ===
+TARGET_BRIGHTNESS = 120  # 目标亮度值（0-255）
+BRIGHTNESS_TOLERANCE = 20  # 亮度调整容差
+ENABLE_BRIGHTNESS_NORMALIZATION = 1  # 是否启用亮度标准化
+
+def normalize_brightness(image):
+    """标准化图像亮度，与UniMR_bpn10.py一致"""
+    if not ENABLE_BRIGHTNESS_NORMALIZATION:
+        return image
+    gray_img = image.convert('L')
+    current_brightness = np.mean(np.array(gray_img))
+    if abs(current_brightness - TARGET_BRIGHTNESS) <= BRIGHTNESS_TOLERANCE:
+        return image
+    alpha = TARGET_BRIGHTNESS / current_brightness
+    enhancer = ImageEnhance.Brightness(image)
+    return enhancer.enhance(alpha)
 
 def rotate_image(image, angle):
     """旋转图像"""
@@ -268,6 +285,11 @@ class App:
                                          width=20)
             self.sample_button.pack(pady=5)
 
+            # 旋转选项Checkbutton
+            self.rotate_var = tk.BooleanVar(value=True)
+            self.rotate_check = tk.Checkbutton(right_top_frame, text="Rotation Augmentation (recommended)", variable=self.rotate_var)
+            self.rotate_check.pack(pady=5)
+
             # 阈值设置框架（左列）
             threshold_frame = tk.LabelFrame(right_bottom_frame, text="Threshold Settings", padx=10, pady=5)
             threshold_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
@@ -461,19 +483,17 @@ class App:
             if not self.init_models():
                 print("Failed to initialize CLIP model")
                 return None
-        
         try:
+            # === 新增：亮度归一化 ===
             images = [Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)) for image in images]
+            images = [normalize_brightness(img) for img in images]
             images = [self.preprocess(image).unsqueeze(0).to(self.device) for image in images]
             images = torch.cat(images, dim=0)
-            
             with torch.no_grad():
                 embeddings = self.model.encode_image(images)
-            
             vectors = embeddings.cpu().numpy().tolist()
             print(f"Successfully computed vectors. Vector dimension: {len(vectors[0])}")
             return vectors
-            
         except Exception as e:
             print(f"Error computing CLIP vectors: {e}")
             return None
@@ -616,19 +636,24 @@ class App:
             if not sample_images:
                 messagebox.showerror("Error", "Please select at least one target molecule")
                 return
-                
-            # 生成旋转后的样本图像
+            
+            # 判断是否旋转增强
+            do_rotate = self.rotate_var.get() if hasattr(self, 'rotate_var') else True
+            # 生成样本图像列表
             rotated_sample_images = []
-            for sample_image in sample_images:
-                for angle in range(0, 360, 10):
-                    rotated_image = rotate_image(sample_image, angle)
-                    rotated_sample_images.append(rotated_image)
+            if do_rotate:
+                for sample_image in sample_images:
+                    for angle in range(0, 360, 10):
+                        rotated_image = rotate_image(sample_image, angle)
+                        rotated_sample_images.append(rotated_image)
+            else:
+                rotated_sample_images = sample_images.copy()
             
             # 如果是自动选择编码方法
             if encoding_method == "auto":
                 # 准备样本图像用于编码方法选择
                 sample_tensor = torch.stack([self.preprocess(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))).to(self.device) 
-                                          for img in sample_images])
+                                          for img in rotated_sample_images])
                 encoding_method = self.select_encoding_method(sample_tensor)
             
             # 处理样本图像
@@ -637,7 +662,7 @@ class App:
                 batch = rotated_sample_images[i:i + max_parallel]
                 if encoding_method == "raw":
                     # 使用原始特征
-                    processed_batch = [self.preprocess(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))).to(self.device) 
+                    processed_batch = [self.preprocess(normalize_brightness(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))).to(self.device) 
                                     for img in batch]
                     processed_batch = torch.stack(processed_batch)
                     vectors = processed_batch.reshape(processed_batch.shape[0], -1).cpu().numpy().tolist()
@@ -659,7 +684,7 @@ class App:
                 batch = unknown_images[i:i + max_parallel]
                 if encoding_method == "raw":
                     # 使用原始特征
-                    processed_batch = [self.preprocess(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))).to(self.device) 
+                    processed_batch = [self.preprocess(normalize_brightness(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))).to(self.device) 
                                     for img in batch]
                     processed_batch = torch.stack(processed_batch)
                     vectors = processed_batch.reshape(processed_batch.shape[0], -1).cpu().numpy().tolist()
@@ -674,10 +699,15 @@ class App:
             
             # 关联样本向量与名称和颜色
             sample_indices = [i for i, info in enumerate(self.molecule_info) if info.get('name')]
-            for i, sample_index in enumerate(sample_indices):
-                info = self.molecule_info[sample_index]
-                for j in range(36):
-                    sample_vectors[(info['name'], j)] = (sample_vectors_list[i * 36 + j], info['color'])
+            if do_rotate:
+                for i, sample_index in enumerate(sample_indices):
+                    info = self.molecule_info[sample_index]
+                    for j in range(36):
+                        sample_vectors[(info['name'], j)] = (sample_vectors_list[i * 36 + j], info['color'])
+            else:
+                for i, sample_index in enumerate(sample_indices):
+                    info = self.molecule_info[sample_index]
+                    sample_vectors[(info['name'], 0)] = (sample_vectors_list[i], info['color'])
             
             # 如果使用自动阈值方法，计算阈值
             if threshold_method != "manual":
